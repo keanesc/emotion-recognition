@@ -4,20 +4,13 @@ A deep learning model to classify facial expressions into 7 categories: **Happy*
 
 ## Model Architecture
 
-The model uses **MobileNetV2**, a lightweight pretrained convolutional neural network optimized for mobile and embedded vision applications. This provides several advantages:
-
-- **Transfer Learning**: Leverages ImageNet pretrained weights for better feature extraction
-- **Efficiency**: Only ~3.5M parameters compared to larger models
-- **Performance**: Achieves competitive accuracy with faster training and inference
-- **Depthwise Separable Convolutions**: Reduces computational cost significantly
+The model uses **MobileNet**, a lightweight pretrained convolutional neural network optimized for mobile and embedded vision applications.
 
 The pretrained MobileNetV2 backbone is fine-tuned with a custom classifier:
 - Dropout layer (0.5) for regularization
 - Dense layer (1280 → 256 neurons) with ReLU
 - Dropout layer (0.3)
 - Output layer (256 → 7 emotion classes)
-
-## Features
 
 - Data augmentation (horizontal flip, rotation, color jitter)
 - Learning rate scheduling with ReduceLROnPlateau
@@ -124,25 +117,7 @@ data/
 
 ## Requirements
 
-- Python 3.12+
-- PyTorch 2.9.0+
-- torchvision
-- PIL (Pillow)
-- matplotlib
-- seaborn
-- scikit-learn
-- tqdm
-- numpy
-
 All dependencies are managed via `pixi.toml`.
-
-## Tips for Better Performance
-
-1. **More Data**: Collect more diverse facial expression images
-2. **Data Augmentation**: Experiment with different augmentation techniques
-3. **Fine-tuning Strategy**: Try unfreezing some backbone layers for better adaptation
-4. **Hyperparameter Tuning**: Adjust learning rate, batch size, and dropout rates
-5. **Other Lightweight Models**: Try EfficientNet-B0 or ResNet18 for comparison
 
 ## License
 
