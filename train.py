@@ -195,7 +195,7 @@ def main():
     train_losses, val_losses = [], []
     train_accs, val_accs = [], []
     best_val_acc = 0.0
-    patience = 4
+    patience = 5
     patience_counter = 0
 
     print("\nStarting training...")
