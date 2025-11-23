@@ -49,16 +49,13 @@ class EmotionCNN(nn.Module):
         weights = models.MobileNet_V3_Large_Weights.DEFAULT if pretrained else None
         self.model = models.mobilenet_v3_large(weights=weights)
 
-        # Replace classifier with enhanced head
+        # Replace classifier with simpler head to reduce overfitting
         # MobileNetV3-Large has 960 input features to classifier
         self.model.classifier = nn.Sequential(
-            nn.Linear(960, 1280),
-            nn.Hardswish(),
-            nn.Dropout(0.4),
-            nn.Linear(1280, 512),
+            nn.Linear(960, 256),
             nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            nn.Linear(512, num_classes),
+            nn.Dropout(0.5),
+            nn.Linear(256, num_classes),
         )
 
     def freeze_backbone_layers(self, num_layers_to_freeze=10):
@@ -72,7 +69,27 @@ class EmotionCNN(nn.Module):
         return self.model(x)
 
 
-def train_epoch(model, dataloader, criterion, optimizer, device):
+def mixup_data(x, y, alpha=0.2):
+    """Apply mixup augmentation to batch"""
+    if alpha > 0:
+        lam = torch.distributions.Beta(alpha, alpha).sample().item()
+    else:
+        lam = 1
+
+    batch_size = x.size(0)
+    index = torch.randperm(batch_size).to(x.device)
+
+    mixed_x = lam * x + (1 - lam) * x[index]
+    y_a, y_b = y, y[index]
+    return mixed_x, y_a, y_b, lam
+
+
+def mixup_criterion(criterion, pred, y_a, y_b, lam):
+    """Compute mixup loss"""
+    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
+
+
+def train_epoch(model, dataloader, criterion, optimizer, device, use_mixup=True):
     model.train()
     running_loss = 0.0
     correct = 0
@@ -82,16 +99,33 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     for inputs, labels in pbar:
         inputs, labels = inputs.to(device), labels.to(device)
 
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+        # Apply mixup augmentation
+        if use_mixup:
+            inputs, labels_a, labels_b, lam = mixup_data(inputs, labels, alpha=0.2)
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = mixup_criterion(criterion, outputs, labels_a, labels_b, lam)
+            loss.backward()
+            optimizer.step()
 
-        running_loss += loss.item() * inputs.size(0)
-        _, predicted = torch.max(outputs, 1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
+            running_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            # For mixup, use the dominant label for accuracy calculation
+            correct += (
+                (predicted == (labels_a if lam > 0.5 else labels_b)).sum().item()
+            )
+        else:
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
 
         pbar.set_postfix(
             {"loss": f"{loss.item():.4f}", "acc": f"{100 * correct / total:.2f}%"}
@@ -192,14 +226,14 @@ def main():
     model = EmotionCNN(num_classes=NUM_CLASSES, pretrained=True).to(device)
 
     # Freeze early backbone layers to prevent overfitting
-    model.freeze_backbone_layers(num_layers_to_freeze=10)
+    model.freeze_backbone_layers(num_layers_to_freeze=12)
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {total_params:,} (trainable: {trainable_params:,})")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.03)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.08)
 
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=5, T_mult=2, eta_min=1e-6
@@ -217,7 +251,7 @@ def main():
         print("-" * 50)
 
         train_loss, train_acc = train_epoch(
-            model, train_loader, criterion, optimizer, device
+            model, train_loader, criterion, optimizer, device, use_mixup=True
         )
 
         val_loss, val_acc = validate(model, test_loader, criterion, device)
