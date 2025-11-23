@@ -54,12 +54,19 @@ class EmotionCNN(nn.Module):
         self.model.classifier = nn.Sequential(
             nn.Linear(960, 1280),
             nn.Hardswish(),
-            nn.Dropout(0.5),
+            nn.Dropout(0.4),
             nn.Linear(1280, 512),
             nn.ReLU(inplace=True),
-            nn.Dropout(0.4),
+            nn.Dropout(0.3),
             nn.Linear(512, num_classes),
         )
+
+    def freeze_backbone_layers(self, num_layers_to_freeze=10):
+        """Freeze early layers of the backbone for better generalization"""
+        layers = list(self.model.features.children())
+        for layer in layers[:num_layers_to_freeze]:
+            for param in layer.parameters():
+                param.requires_grad = False
 
     def forward(self, x):
         return self.model(x)
@@ -131,7 +138,7 @@ def main():
 
     BATCH_SIZE = 64
     NUM_EPOCHS = 30
-    LEARNING_RATE = 0.001
+    LEARNING_RATE = 0.0005
     IMG_SIZE = 224
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -142,7 +149,8 @@ def main():
             transforms.Resize((IMG_SIZE, IMG_SIZE)),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomRotation(10),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+            transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15),
+            transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
@@ -182,11 +190,16 @@ def main():
     print("Creating model...")
     print("Using MobileNetV3-Large with pretrained weights")
     model = EmotionCNN(num_classes=NUM_CLASSES, pretrained=True).to(device)
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+    # Freeze early backbone layers to prevent overfitting
+    model.freeze_backbone_layers(num_layers_to_freeze=10)
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters: {total_params:,} (trainable: {trainable_params:,})")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.05)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.03)
 
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=5, T_mult=2, eta_min=1e-6
@@ -195,7 +208,7 @@ def main():
     train_losses, val_losses = [], []
     train_accs, val_accs = [], []
     best_val_acc = 0.0
-    patience = 5
+    patience = 7
     patience_counter = 0
 
     print("\nStarting training...")
