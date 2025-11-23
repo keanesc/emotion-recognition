@@ -54,7 +54,7 @@ class EmotionCNN(nn.Module):
         self.model.classifier = nn.Sequential(
             nn.Linear(960, 256),
             nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
+            nn.Dropout(0.3),
             nn.Linear(256, num_classes),
         )
 
@@ -98,6 +98,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device, use_mixup=True)
     pbar = tqdm(dataloader, desc="Training")
     for inputs, labels in pbar:
         inputs, labels = inputs.to(device), labels.to(device)
+        original_labels = labels.clone()  # Keep original labels for accuracy
 
         # Apply mixup augmentation
         if use_mixup:
@@ -110,11 +111,9 @@ def train_epoch(model, dataloader, criterion, optimizer, device, use_mixup=True)
 
             running_loss += loss.item() * inputs.size(0)
             _, predicted = torch.max(outputs, 1)
-            total += labels.size(0)
-            # For mixup, use the dominant label for accuracy calculation
-            correct += (
-                (predicted == (labels_a if lam > 0.5 else labels_b)).sum().item()
-            )
+            total += original_labels.size(0)
+            # Use original labels for honest accuracy reporting
+            correct += (predicted == original_labels).sum().item()
         else:
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -226,14 +225,14 @@ def main():
     model = EmotionCNN(num_classes=NUM_CLASSES, pretrained=True).to(device)
 
     # Freeze early backbone layers to prevent overfitting
-    model.freeze_backbone_layers(num_layers_to_freeze=12)
+    model.freeze_backbone_layers(num_layers_to_freeze=6)
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {total_params:,} (trainable: {trainable_params:,})")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.08)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.02)
 
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=5, T_mult=2, eta_min=1e-6
