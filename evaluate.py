@@ -52,8 +52,14 @@ class EmotionCNN(nn.Module):
         weights = models.MobileNet_V3_Large_Weights.DEFAULT if pretrained else None
         self.model = models.mobilenet_v3_large(weights=weights)
 
-        # Replace the final classifier layer (layer 3)
-        self.model.classifier[3] = nn.Linear(1024, num_classes)
+        # Replace classifier with simpler head to reduce overfitting
+        # MobileNetV3-Large has 960 input features to classifier
+        self.model.classifier = nn.Sequential(
+            nn.Linear(960, 256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(256, num_classes),
+        )
 
     def forward(self, x):
         return self.model(x)
